@@ -1,85 +1,122 @@
 import 'ol/ol.css';
-import GeoJSON from 'ol/format/GeoJSON';
-import Map from 'ol/Map';
-import VectorLayer from 'ol/layer/Vector';
-import VectorSource from 'ol/source/Vector';
-import View from 'ol/View';
-import sync from 'ol-hashed';
-import DragAndDrop from 'ol/interaction/DragAndDrop';
-import Modify from 'ol/interaction/Modify';
-import Draw from 'ol/interaction/Draw';
-import Snap from 'ol/interaction/Snap';
-import {Fill, Stroke, Style} from 'ol/style';
-import {getArea} from 'ol/sphere';
-import colormap from 'colormap';
+import Overlay from 'ol/Overlay';
+import {apply} from 'ol-mapbox-style';
 
-const source = new VectorSource();
+const map = apply('map-container', './data/bright.json');
 
-const map = new Map({
-  target: 'map-container',
-  
-  view: new View({
-    center: [0, 0],
-    zoom: 2
-  })
+ 
+    //map.addLayer(layer); 
+
+    const overlay = new Overlay({
+        element: document.getElementById('popup-container'),
+        positioning: 'bottom-center',
+        offset: [0, -10],
+        autoPan: true
+    });
+    map.addOverlay(overlay);
+    overlay.getElement().addEventListener('click', function() {
+        overlay.setPosition();
+    });
+    map.on('click', function(e) {
+        let markup = '';
+        map.forEachFeatureAtPixel(e.pixel, function(feature) {
+            markup += `${markup && '<hr>'}<table>`;
+            const properties = feature.getProperties();
+            for (const property in properties) {
+                markup += `<tr><th>${property}</th><td>${properties[property]}</td></tr>`;
+            }
+            markup += '</table>';
+        }, {hitTolerance: 1});
+        if (markup) {
+            document.getElementById('popup-content').innerHTML = markup;
+            overlay.setPosition(e.coordinate);
+        } else {
+            overlay.setPosition();
+        }            
+    });
+    layer.setStyle(function(feature, resolution) {
+        const properties = feature.getProperties();
+
+        //Water polygons
+        if(properties.layer == 'water') {
+            return new Style({
+                fill: new Fill({
+                    color: 'rgba(0, 0, 255, 0.7)'
+                })
+            });
+        }
+
+        //Boundary lines
+        if (properties.layer == 'boundary' && properties.admin_level == 2) {
+            return new Style({
+                stroke: new Stroke({
+                    color: 'gray'
+                })
+            });
+        }
+
+        //Continent labels
+        if (properties.layer == 'place' && properties.class == 'continent') {
+            return new Style({
+                text: new Text({
+                    text: properties.name,
+                    font: 'bold 16px Open Sans',
+                    fill: new Fill({
+                        color: 'black'
+                    }),
+                    stroke: new Stroke({
+                        color: 'white'
+                    })
+                })
+            });
+        }
+
+        //Country labels
+        if (properties.layer == 'place' && properties.class == 'country' &&
+            resolution < map.getView().getResolutionForZoom(5)) {
+                return new Style({
+                    text: new Text({
+                        text: properties.name,
+                        font: 'normal 13px Open Sans',
+                        fill: new Fill({
+                            color: 'black'
+                        }),
+                        stroke: new Stroke({
+                            color: 'white'
+                        })
+                    })
+                });
+            }
+
+        // Capital icons and labels
+        if (properties.layer == 'place' && properties.capital) {
+            const point = new Style({
+                image: new Circle({
+                    radius: 5, 
+                    fill: new Fill({
+                        color: 'black'
+                    }),
+                    stroke: new Stroke({
+                        color: 'gray'
+                    })
+                })
+            });
+        
+        if (resolution < map.getView().getResolutionForZoom(6)) {
+            point.setText(new Text({
+                text: properties.name,
+                font: 'italic 12px Open Sans',
+                offsetY: -12,
+                fill: new Fill({
+                    color: '#013'
+                }),
+                stroke: new Stroke({
+                    color: 'white'
+                })
+            }));
+        }
+        return point;
+    }
+
+    // return createDefaultStyle(feature, resolution);
 });
-sync(map);
-const layer = new VectorLayer({
-    source: source,
-    style: function(feature) {
-        return new Style({
-        fill: new Fill({
-            color: getColor(feature)
-        }),
-        stroke: new Stroke({
-            color: 'rgba(255,255,255,0.8)'
-        })
-  });
-}
-});
-  map.addLayer(layer);
-  map.addInteraction(new DragAndDrop({ 
-      source: source, 
-      formatConstructors: [GeoJSON] 
-})); 
-map.addInteraction(new Modify({
-    source: source 
-}));
-map.addInteraction(new Draw({
-    type: 'Polygon',
-    source: source 
-}));
-map.addInteraction(new Snap({
-    source: source 
-}));
-const clear = document.getElementById('clear');
-clear.addEventListener('click', function() {
-    source.clear();    
-});
-const format = new GeoJSON({featureProjection: 'EPSG:3857'});
-const download = document.getElementById('download');
-source.on('change', function() {
-    const features = source.getFeatures();
-    const json = format.writeFeatures(features);
-    download.href = 'data:text/json;charset=utf-8,' + json;
-});
-
-const min = 1e8; // the smallest area
-const max = 2e13; // the biggest area
-const steps = 50;
-const ramp = colormap({
-    colormap: 'blackbody',
-    nshades: steps
-});
-
-function clamp(value, low, high) {
-    return Math.max(low, Math.min(value, high));
-}
-
-function getColor(feature) {
-    const area = getArea(feature.getGeometry());
-    const f = Math.pow(clamp((area - min) / (max - min), 0, 1), 1 / 2);
-    const index = Math.round(f * (steps - 1));
-    return ramp[index];
-}
-
